@@ -21,10 +21,14 @@ void ApplyFunction(std::vector<T>& data,
         realThreadCount = threadCount;
     }
     std::vector<std::jthread> jthreadPull;
-    jthreadPull.reserve(realThreadCount); 
+    jthreadPull.reserve(realThreadCount);
+    const auto elementCount = data.size() / realThreadCount;
     for (int i = 0; i < realThreadCount; ++i) {
         jthreadPull.emplace_back([&, i]() {
-            for (int j = i; j < data.size(); j += realThreadCount) {
+            const auto begin = i * elementCount;
+            const auto end = (i == realThreadCount - 1) ? data.size()
+                                                        : (i + 1) * elementCount;
+            for (int j = begin; j < end; ++j) {
                 transform(data[j]);
             }
         });

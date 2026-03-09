@@ -37,6 +37,16 @@ TEST(ApplyFunction, SingleThread) {
     EXPECT_EQ(data, expected_data);
 }
 
+TEST(ApplyFunction, MultiThread) {
+    std::vector<int> data(10);
+    std::iota(data.begin(), data.end(), 0);
+    ApplyFunction<int>(data, [](int& value) {
+        value += 7;
+    }, 3);
+    const std::vector<int> expected_data{7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+    EXPECT_EQ(data, expected_data);
+}
+
 TEST(ApplyFunction, DataSizeLessThanThreadCount) {
     std::vector<int> data{2, 4, 6, 8, 10};
     ApplyFunction<int>(data, [](int& value) {
