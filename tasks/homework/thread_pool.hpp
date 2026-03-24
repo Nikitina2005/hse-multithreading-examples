@@ -7,9 +7,11 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <queue>
+#include <thread>
+#include <type_traits>
 #include <utility>
-#include <sys/wait.h>
-#include <unistd.h>
+#include <vector>
 
 template <typename T>
 struct shared_state {
@@ -79,71 +81,58 @@ public:
     }
 };
 
-class process_pool {
-    size_t max_children;
+class thread_pool {
     std::mutex mtx;
     std::condition_variable cond_var;
-    size_t running_children{0};
+    size_t max_threads{0};
+    bool stop{false};
+    std::queue<std::function<void()>> tasks;
+    std::vector<std::jthread> threads;
 public:
-    explicit process_pool(size_t n) {
-        if (n == 0) {
-            max_children = 1;
+    explicit thread_pool(size_t n) {
+        if (n > 0) {
+            max_threads = n;
         } else {
-            max_children = n;
+            max_threads = 1;
         }
+        threads.reserve(max_threads);
+        for (int i = 0; i < max_threads; ++i) {
+            threads.emplace_back([&] {
+                while (true) {
+                    std::unique_lock<std::mutex> lock(mtx);
+                    cond_var.wait(lock, [&] {
+                        return (stop || (tasks.size() > 0));
+                    });
+                    if (stop && tasks.empty()) {
+                        return;
+                    }
+                    auto task = std::move(tasks.front());
+                    tasks.pop();
+                    lock.unlock();
+                    task();
+                }
+            });
+        }
+    }
+
+    ~thread_pool() {
+        std::lock_guard<std::mutex> lock(mtx);
+        stop = true;
+        cond_var.notify_all();
     }
 
     template <typename T>
     my_future<T> submit(std::function<T()> func) {
         auto state = std::make_shared<shared_state<T>>();
-        std::unique_lock<std::mutex> lock(mtx);
-        cond_var.wait(lock, [&] {
-            return running_children < max_children;
+        std::lock_guard<std::mutex> lock(mtx);
+        tasks.emplace([state, func]() {
+            T result = func();
+            std::lock_guard<std::mutex> state_lock(state -> mutex);
+            state -> value = std::move(result);
+            state -> ready = true;
+            state -> cond_var.notify_all();
         });
-        ++running_children;
-        lock.unlock();
-        int pipefd[2];
-        if (pipe(pipefd) != 0) {
-            lock.lock();
-            if (running_children > 0) {
-                --running_children;
-            }
-            cond_var.notify_all();
-            return my_future<T>(state);
-        }
-        const pid_t pid = fork();
-        if (pid < 0) {
-            close(pipefd[0]);
-            close(pipefd[1]);
-            lock.lock();
-            if (running_children > 0) {
-                --running_children;
-            }
-            cond_var.notify_all();
-            return my_future<T>(state);
-        }
-        if (pid == 0) {
-            close(pipefd[0]);
-            T child_result = func();
-            write(pipefd[1], &child_result, sizeof(T));
-            close(pipefd[1]);
-            exit(0);
-        }
-        close(pipefd[1]);
-        const int read_fd = pipefd[0];
-        T result{};
-        read(read_fd, &result, sizeof(T));
-        std::lock_guard<std::mutex> value_lock(state -> mutex);
-        state -> value = result;
-        state -> ready = true;
-        state -> cond_var.notify_all();
-        close(read_fd);
-        waitpid(pid, nullptr, 0);
-        lock.lock();
-        if (running_children > 0) {
-            --running_children;
-        }
-        cond_var.notify_all();
+        cond_var.notify_one();
         return my_future<T>(state);
     }
 };

@@ -10,6 +10,6 @@ FetchContent_Declare(googletest GIT_REPOSITORY https://github.com/google/googlet
 FetchContent_MakeAvailable(googletest)
 
 enable_testing()
-add_executable(process_pool_test process_pool_test.cpp)
-target_link_libraries(process_pool_test PRIVATE GTest::gtest_main Threads::Threads)
-add_test(NAME process_pool COMMAND process_pool_test)
+add_executable(thread_pool_test thread_pool_test.cpp)
+target_link_libraries(thread_pool_test PRIVATE GTest::gtest_main Threads::Threads)
+add_test(NAME thread_pool COMMAND thread_pool_test)
