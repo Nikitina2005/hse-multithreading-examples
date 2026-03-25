@@ -99,6 +99,7 @@ public:
         if (shm_fd != -1) {
             close(shm_fd);
         }
+        shm_unlink("/mpsc");
     }
 
     queue_info * info() {
@@ -162,15 +163,15 @@ public:
                 return true;
             }
             if (remain < sizeof(message_header)) {
+                info -> producer_write.fetch_add(remain);
                 continue;
             }
             if (free < remain + full_size) {
                 return false;
             }
             message_header * header = reinterpret_cast<message_header *>(queue.ring_buffer() + offset);
-            header -> size.store((buffer_size - offset) + 1);
+            header -> size.store(buffer_size + 1);
             std::memset(header -> type, 0, 32);
-            std::memcpy(header -> type, type.c_str(), type.size());
             info -> producer_write.fetch_add(remain);
         }
     }
